@@ -125,6 +125,11 @@ class ChromaLocalBackend(BaseVectorStoreBackend):
         )
         self._client: chromadb.PersistentClient | None = None
 
+    @property
+    def store_location(self) -> tuple[Any, ...]:
+        """The directory, which holds only this KB's collection."""
+        return (self.kb_path,)
+
     # ---- client plumbing -------------------------------------------------
 
     def _get_fresh_client(self) -> chromadb.PersistentClient:
@@ -401,6 +406,18 @@ class ChromaCloudBackend(BaseVectorStoreBackend):
         # cloud_region stored for display; chromadb.CloudClient does not yet
         # accept a region parameter directly.
         return chromadb.CloudClient(**kwargs)
+
+    @property
+    def store_location(self) -> tuple[Any, ...]:
+        """The resolved account, host, and collection."""
+        return (
+            self._resolved_api_key,
+            self._resolved_tenant,
+            self._resolved_database,
+            self.backend_config.get("cloud_host"),
+            self.backend_config.get("cloud_port"),
+            self._resolve_collection_name(),
+        )
 
     def _resolve_collection_name(self) -> str:
         """Resolve this KB's collection in the resolved tenant and database.
