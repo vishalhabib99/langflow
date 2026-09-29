@@ -285,7 +285,6 @@ def test_relocation_allows_empty_collection_override(backend_type, config):
     validate_relocation_target_config(backend_type, config)
 
 
-@pytest.mark.api_key_required
 @pytest.mark.parametrize(
     ("backend_type", "config", "metric"),
     [
@@ -301,6 +300,7 @@ def test_backends_report_the_metric_they_rank_by(tmp_path: Path, backend_type, c
     assert backend.distance_metric == metric
 
 
+@pytest.mark.api_key_required
 class TestRelocationToPostgresLive:
     @pytest.fixture(autouse=True)
     def _require_pgvector(self):
