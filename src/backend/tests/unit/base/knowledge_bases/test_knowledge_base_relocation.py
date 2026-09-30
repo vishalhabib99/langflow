@@ -194,6 +194,27 @@ class TestRelocationWithoutATarget:
         row = await knowledge_base_service.get_by_id(record.id)
         assert row.backend_type == "chroma"
 
+    @pytest.mark.parametrize(
+        ("target", "config", "how"),
+        [
+            ("postgres", {}, "--allow-metric-change"),
+            ("opensearch", {"url_variable": "OPENSEARCH_URL", "space_type": "cosinesimil"}, '{"space_type": "l2"}'),
+        ],
+    )
+    async def test_metric_refusal_says_how_to_proceed(self, active_user, kb_root, target, config, how):
+        # pgvector's metric is fixed, so the only way through is to accept the change.
+        kb_name = f"kb_metric_{target}"
+        await _seed_chroma_kb(kb_root, active_user.username, kb_name, 6, unit=False)
+        record = await knowledge_base_service.create_record(
+            user_id=active_user.id, name=kb_name, model_selection={"name": "m", "provider": "p"}, chunks=6
+        )
+
+        results = await relocate_knowledge_bases(target_backend_type=target, target_backend_config=config, dry_run=True)
+
+        result = next(r for r in results if r.kb_id == record.id)
+        assert result.status == "failed"
+        assert how in result.reason
+
 
 async def _database_state() -> tuple[str, list[uuid.UUID], uuid.UUID]:
     async with session_scope() as session:
@@ -395,6 +416,29 @@ class TestRelocationToPostgresLive:
             assert result.copied == 0
 
         assert (await knowledge_base_service.get_by_id(record.id)).backend_type == "chroma"
+
+    async def test_allow_metric_change_moves_them_anyway_with_a_warning(self, active_user, kb_root, tmp_path: Path):
+        kb_name = f"kb_allow_{uuid.uuid4().hex[:6]}"
+        await _seed_chroma_kb(kb_root, active_user.username, kb_name, 6, unit=False)
+        record = await knowledge_base_service.create_record(
+            user_id=active_user.id, name=kb_name, model_selection={"name": "m", "provider": "p"}, chunks=6
+        )
+        target = create_backend(
+            "postgres", kb_name=kb_name, kb_path=tmp_path, backend_config={}, user_id=active_user.id
+        )
+        try:
+            results = await relocate_knowledge_bases(
+                target_backend_type="postgres", target_backend_config={}, allow_metric_change=True
+            )
+            result = next(r for r in results if r.kb_id == record.id)
+            assert result.status == "relocated", result.reason
+            assert any(
+                "ranks by l2 distance and the target by cosine" in w and "may change" in w for w in result.warnings
+            ), result.warnings
+        finally:
+            with contextlib.suppress(Exception):
+                await target.delete_collection()
+            await target.teardown()
 
     async def test_unit_length_vectors_move_with_a_warning_about_scores(self, active_user, kb_root, tmp_path: Path):
         kb_name = f"kb_unit_{uuid.uuid4().hex[:6]}"
